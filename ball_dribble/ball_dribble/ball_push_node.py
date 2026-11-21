@@ -31,11 +31,11 @@ from nav_msgs.msg import Odometry, OccupancyGrid
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-from scipy import ndimage
 from std_msgs.msg import String
 from visualization_msgs.msg import Marker
 
 from ball_dribble.ball_control import BallPusher, Config   # noqa: E402
+from ball_dribble.mapwalls import MapWalls                 # noqa: E402
 from ball_dribble.physics import wrap                      # noqa: E402
 
 
@@ -52,30 +52,6 @@ def find_data_file(name):
     except Exception:
         pass
     return Path(__file__).resolve().parents[1] / 'paths' / name      # running from a source checkout
-
-
-class MapWalls:
-    """Distance to the nearest occupied cell, from an OccupancyGrid (same idea as WallField in the Frenet node)."""
-
-    def __init__(self, msg, occupied_threshold=65):
-        w, h, self.res = msg.info.width, msg.info.height, msg.info.resolution
-        data = np.asarray(msg.data, dtype=np.int16).reshape(h, w)
-        occupied = data >= occupied_threshold
-        self.field = ndimage.distance_transform_edt(~occupied) * self.res
-        o = msg.info.origin
-        q = o.orientation
-        self.ox, self.oy = o.position.x, o.position.y
-        self.oyaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
-        self.h = h
-
-    def dist(self, x, y):
-        x, y = np.asarray(x, float), np.asarray(y, float)
-        c, s = math.cos(self.oyaw), math.sin(self.oyaw)
-        dx, dy = x - self.ox, y - self.oy
-        col = (c * dx + s * dy) / self.res - 0.5
-        row = (-s * dx + c * dy) / self.res - 0.5
-        out = ndimage.map_coordinates(self.field, [row.ravel(), col.ravel()], order=1, mode='nearest')
-        return out.reshape(x.shape)
 
 
 class BallPushNode(Node):

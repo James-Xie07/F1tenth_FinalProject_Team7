@@ -16,5 +16,6 @@ setup(
     entry_points={'console_scripts': [
         'ball_push_node = ball_dribble.ball_push_node:main',
         'ball_detector_node = ball_dribble.ball_detector_node:main',
+        'ball_sim_node = ball_dribble.ball_sim_node:main',
     ]},
 )

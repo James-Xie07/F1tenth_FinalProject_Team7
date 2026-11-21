@@ -40,12 +40,18 @@ class Marker:
         self.scale = ns(x=0, y=0, z=0); self.color = ns(a=0, r=0, g=0, b=0)
 class Drive:
     def __init__(self): self.header = ns(stamp=None, frame_id=''); self.drive = ns(speed=0, steering_angle=0, acceleration=0)
+class _T:
+    def __init__(self, nanoseconds=0): self.ns = nanoseconds
+    def to_msg(self): return ns(sec=int(self.ns // 10**9), nanosec=int(self.ns % 10**9))
 mod('rclpy', init=lambda args=None: None, try_shutdown=lambda: None)
+mod('rclpy.time', Time=_T); sys.modules['rclpy'].time = sys.modules['rclpy.time']
 mod('rclpy.node', Node=Node); mod('rclpy.callback_groups', MutuallyExclusiveCallbackGroup=lambda: None)
 mod('rclpy.qos', QoSProfile=lambda **k: None, HistoryPolicy=Enum, ReliabilityPolicy=Enum, DurabilityPolicy=Enum)
 mod('rclpy.executors', MultiThreadedExecutor=object)
 mod('ackermann_msgs'); mod('ackermann_msgs.msg', AckermannDriveStamped=Drive)
-mod('geometry_msgs'); mod('geometry_msgs.msg', PointStamped=object)
+class PointStamped:
+    def __init__(self): self.header = ns(stamp=None, frame_id=''); self.point = ns(x=0, y=0, z=0)
+mod('geometry_msgs'); mod('geometry_msgs.msg', PointStamped=PointStamped)
 mod('nav_msgs'); mod('nav_msgs.msg', Odometry=object, OccupancyGrid=object)
 mod('std_msgs'); mod('std_msgs.msg', String=lambda data='': ns(data=data))
 mod('visualization_msgs'); mod('visualization_msgs.msg', Marker=Marker)
@@ -57,7 +63,7 @@ from ball_dribble import sim
 def odom(t, x, y, yaw, v, frame='map'):
     q = ns(x=0.0, y=0.0, z=math.sin(yaw / 2), w=math.cos(yaw / 2))
     return ns(header=ns(frame_id=frame, stamp=ns(sec=int(t), nanosec=int((t % 1) * 1e9))),
-              pose=ns(pose=ns(position=ns(x=x, y=y), orientation=q)), twist=ns(twist=ns(linear=ns(x=v))))
+              pose=ns(pose=ns(position=ns(x=x, y=y), orientation=q)), twist=ns(twist=ns(linear=ns(x=v), angular=ns(z=0.0))))
 
 def main(T=14.0, dt=0.002):
     node = bpn.BallPushNode()
