@@ -215,7 +215,7 @@ class BallPushNode(Node):
         b = info['ball']
         m.pose.position.x, m.pose.position.y, m.pose.position.z = float(b[0]), float(b[1]), float(self.cfg.ball_radius)
         m.pose.orientation.w = 1.0
-        m.scale.x = m.scale.y = m.scale.z = 2.0 * self.cfg.ball_radius
+        m.scale.x = m.scale.y = m.scale.z = 0.2
         held, lost = info['contact'], info['mode'] == 'SEARCH'
         m.color.a = 1.0
         m.color.r, m.color.g, m.color.b = (1.0, 0.0, 0.0) if lost else ((0.0, 1.0, 0.0) if held else (1.0, 0.9, 0.0))

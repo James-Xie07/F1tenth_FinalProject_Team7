@@ -134,7 +134,7 @@ class BallSimNode(Node):
         m.ns, m.id, m.type, m.action = 'ball_truth', 0, Marker.SPHERE, Marker.ADD
         m.pose.position.x, m.pose.position.y, m.pose.position.z = tr.point.x, tr.point.y, tr.point.z
         m.pose.orientation.w = 1.0
-        m.scale.x = m.scale.y = m.scale.z = 2.0 * self.prm.radius
+        m.scale.x = m.scale.y = m.scale.z = 0.2
         m.color.a = 1.0
         m.color.r, m.color.g, m.color.b = (0.0, 1.0, 0.0) if self.touch else (1.0, 0.5, 0.0)
         self.marker_pub.publish(m)

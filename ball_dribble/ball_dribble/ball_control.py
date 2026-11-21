@@ -37,6 +37,7 @@ class Config:
     wheelbase: float = 0.46
     max_steer: float = 0.4189
     scoop_kind: str = 'channel'        # 'channel' (recommended), 'v', 'claw', 'flat'
+    scoop_apex_x: float = BODY_FRONT + 0.02   # back of the scoop (where a pushed ball touches it) ahead of the rear axle [m]; ball centre = this + ball_radius
     # ---- steering ----
     k_cross: float = 2.0               # Stanley cross-track gain (push)
     k_line: float = 2.5                # Stanley gain onto the approach line
@@ -175,7 +176,7 @@ class PathRef:
         self.kappa = np.convolve(np.r_[k[-4:], k, k[:4]], kern, mode='valid')
         self.tree = cKDTree(self.xy)
         self.cfg = cfg
-        self.x_b = rider_x(make_scoop(cfg.scoop_kind), cfg.ball_radius)    # ball centre ahead of the rear axle
+        self.x_b = rider_x(make_scoop(cfg.scoop_kind, apex_x=cfg.scoop_apex_x), cfg.ball_radius)    # ball centre ahead of the rear axle
         self.v_ref = self._profile(cfg)
         self.v_free = self._free_profile(cfg)
 
@@ -263,7 +264,7 @@ class BallTracker:
     def __init__(self, cfg):
         self.cfg = cfg
         self.prm = BallParams(radius=cfg.ball_radius, roll_decel=cfg.ball_roll_decel)
-        self.scoop = make_scoop(cfg.scoop_kind)
+        self.scoop = make_scoop(cfg.scoop_kind, apex_x=cfg.scoop_apex_x)
         self.hist = collections.deque(maxlen=800)
         self.reset()
 
@@ -390,7 +391,7 @@ class BallPusher:
         self.walls = walls
         self.path = PathRef(self.cfg)
         self.tracker = BallTracker(self.cfg)
-        self.scoop = make_scoop(self.cfg.scoop_kind)
+        self.scoop = make_scoop(self.cfg.scoop_kind, apex_x=self.cfg.scoop_apex_x)
         self.apex = float(self.scoop[:, 0].min())
         self.rider = rider_x(self.scoop, self.cfg.ball_radius)                   # where a pushed ball's centre sits
         self.v_cmd = 0.0
