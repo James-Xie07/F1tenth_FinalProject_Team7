@@ -97,3 +97,24 @@ def test_separate_sim_launches_do_not_start_duplicate_controller_or_gym():
     real_cfg = (ROOT / 'config/frenet.yaml').read_text()
     assert 'levine_ball_path.csv' in real_cfg
     assert 'reference_is_ball_path: true' in real_cfg
+
+
+def test_real_launch_filters_camera_topics_and_starts_web_video():
+    launch = (ROOT / 'launch/real_levine.launch.py').read_text()
+    assert "executable='ball_video_web_node'" in launch
+    assert "executable='foxglove_bridge'" in launch
+    assert "'topic_whitelist': foxglove_topics" in launch
+    assert '/camera/' not in launch
+    assert '/ball_detector_node/debug_image' not in launch
+    assert "r'/ball/position'" in launch
+    assert "r'/ball_frenet_mpc_node/.*'" in launch
+
+
+def test_web_video_is_packaged_and_does_not_change_contact_logic():
+    setup = (ROOT / 'setup.py').read_text()
+    video = (ROOT / 'ball_dribble/ball_video_web_node.py').read_text()
+    recovery = (ROOT / 'ball_dribble/ball_recovery.py').read_text()
+    assert 'ball_video_web_node = ball_dribble.ball_video_web_node:main' in setup
+    assert "'/stream.mjpg'" in video
+    assert "cv2.imencode('.jpg'" in video
+    assert 'CALIBRATING_CONTACT' not in recovery

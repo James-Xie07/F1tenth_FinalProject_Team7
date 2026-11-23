@@ -47,3 +47,11 @@ ball_detector_node:
     depth_topic: "/camera/camera/aligned_depth_to_color/image_raw"
     color_topic: "/camera/camera/color/image_raw"
     info_topic: "/camera/camera/color/camera_info"
+ball_video_web_node:
+  ros__parameters:
+    source_topic: "/ball_detector_node/debug_image"
+    bind_address: "0.0.0.0"
+    port: 8080
+    max_fps: 10.0
+    jpeg_quality: 65
+    output_width: 640

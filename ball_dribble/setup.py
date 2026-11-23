@@ -17,6 +17,7 @@ setup(
         'ball_push_node = ball_dribble.ball_push_node:main',  # retained Stanley implementation
         'ball_frenet_mpc_node = ball_dribble.ball_frenet_mpc_node:main',
         'ball_detector_node = ball_dribble.ball_detector_node:main',
+        'ball_video_web_node = ball_dribble.ball_video_web_node:main',
         'ball_sim_node = ball_dribble.ball_sim_node:main',
     ]},
 )

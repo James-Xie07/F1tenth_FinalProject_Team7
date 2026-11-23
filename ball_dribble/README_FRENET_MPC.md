@@ -62,6 +62,28 @@
 
    也可在节点已运行时执行 `ros2 param set /ball_frenet_mpc_node enable_motion true`。请勿同时启动旧 `stanley_car.launch.py`。
 
+### 相机调试网页与 Foxglove 过滤
+
+实车 launch 默认启动一个经过话题白名单限制的 Foxglove Bridge。它只转发地图、雷达、里程计、球位置、控制状态和规划路径，**不会向 Foxglove 提供 `/camera/**`、RealSense 深度/点云或 `/ball_detector_node/debug_image`**。请先停止任何另外启动的、未设置白名单的 Foxglove Bridge，避免它继续暴露全部相机话题或占用同一个 8765 端口。
+
+检测器画面在 Jetson 本机缩放为最大 640 px、限制为 10 FPS，并以 JPEG quality 65 编码。浏览器访问：
+
+```text
+http://team7.local:8080/
+```
+
+如果 mDNS 不可用，请将 `team7.local` 换成 Jetson 的 IP 地址。网页仅供同一网络内调试，当前不包含认证或 TLS，请勿暴露到不可信网络。
+
+端口可在启动时修改，也可按需关闭网页或内置 Foxglove Bridge：
+
+```bash
+ros2 launch ball_dribble real_levine.launch.py web_video_port:=8081
+ros2 launch ball_dribble real_levine.launch.py start_web_video:=false
+ros2 launch ball_dribble real_levine.launch.py start_foxglove_bridge:=false
+```
+
+只有在你自己启动了同样带 `topic_whitelist` 的 Bridge 时，才应使用最后一个选项。默认 Foxglove 地址仍是 `ws://team7.local:8765`。
+
 查看模式和 RViz 路径：
 
 ```bash
