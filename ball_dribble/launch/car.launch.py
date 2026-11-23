@@ -23,9 +23,12 @@ def generate_launch_description():
         DeclareLaunchArgument('web_video_port',default_value='8080'),
         DeclareLaunchArgument('start_foxglove_bridge',default_value='true'),
         DeclareLaunchArgument('foxglove_port',default_value='8765'),
-        Node(package='ball_dribble',executable='ball_detector_node',output='screen',parameters=[cfg]),
+        # Use the system NumPy that matches OpenCV for the camera processes.
+        Node(package='ball_dribble',executable='ball_detector_node',output='screen',
+             additional_env={'PYTHONNOUSERSITE': '1'},parameters=[cfg]),
         Node(package='ball_dribble',executable='ball_video_web_node',output='screen',
              condition=IfCondition(LaunchConfiguration('start_web_video')),
+             additional_env={'PYTHONNOUSERSITE': '1'},
              parameters=[cfg, {'port': ParameterValue(
                  LaunchConfiguration('web_video_port'),value_type=int)}]),
         Node(package='ball_dribble',executable='ball_frenet_mpc_node',output='screen',
