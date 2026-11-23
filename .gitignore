@@ -1,0 +1,16 @@
+# ROS 2 build artifacts
+**/build/
+**/install/
+**/log/
+**/__pycache__/
+**/*.py[cod]
+*.egg-info/
+.pytest_cache/
+# Logs and recordings
+*.db3
+*.mcap
+*.bag
+rosbag2_*/
+# Development
+*.swp
+.DS_Store

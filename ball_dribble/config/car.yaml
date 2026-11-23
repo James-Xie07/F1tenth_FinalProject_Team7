@@ -1,0 +1,20 @@
+# Parameters for the real car. Use decimal points on every float.
+ball_push_node:
+  ros__parameters:
+    odom_topic: "/pf/pose/odom"
+    speed_topic: "/odom"
+    odom_is_laser_pose: true
+    lidar_offset_x: 0.27
+    waypoint_file: "ball_path.csv"   # replace with the path built from the Levine map
+    max_speed: 0.6
+    ball_roll_decel: 0.30      # PLACEHOLDER: measure with scripts/calibrate_ball.py, use ~0.8 x the result
+ball_detector_node:
+  ros__parameters:
+    cam_x: 0.15                # MEASURE: camera position from the rear axle [m]
+    cam_y: 0.0
+    cam_z: 0.25
+    cam_pitch_deg: 20.0        # MEASURE: tilt down
+    h_min: 20                  # from the team's HSV sliders
+    h_max: 48
+    s_min: 58
+    v_min: 23

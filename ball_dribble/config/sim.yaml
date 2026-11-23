@@ -1,0 +1,16 @@
+# Parameters for the simulator (f1tenth_gym_ros + ball_sim_node). Use decimal points on every float.
+ball_sim_node:
+  ros__parameters:
+    odom_offset_x: 0.0         # bridge odom is already the rear axle
+    ball_roll_decel: 0.35      # TRUE rolling deceleration of the simulated ball [m/s^2]
+    scoop_kind: "channel"
+    start_ahead: 0.0           # spawn the ball resting in the scoop; use rviz "Publish Point" to move it
+ball_push_node:
+  ros__parameters:
+    odom_topic: "/ego_racecar/odom"
+    speed_topic: ""            # take the speed from the odom twist
+    odom_is_laser_pose: false  # bridge odom is the rear axle, not the lidar
+    wheelbase: 0.3302          # f1tenth_gym default car
+    waypoint_file: "ball_path.csv"   # MUST be built from the map the gym loads
+    max_speed: 0.5
+    ball_roll_decel: 0.35      # what the CONTROLLER believes
