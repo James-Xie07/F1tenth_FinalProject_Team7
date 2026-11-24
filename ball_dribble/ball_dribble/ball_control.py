@@ -33,6 +33,8 @@ class Config:
     v_min: float = 0.6
     speed_up: float = 1.0              # speed ramp while pushing [m/s^2]
     hold_margin: float = 0.75          # fraction of the ball's rolling decel the pusher may use (see PathRef._profile)
+    lat_accel_limit: float = 0.0       # [m/s^2] lateral acceleration cap in turns, v <= sqrt(limit / curvature): slows the corners so max_speed can be
+                                       # raised for the straights.  0 = off (only the ball-hold limit of PathRef._profile applies)
     # ---- car ----
     wheelbase: float = 0.46
     max_steer: float = 0.4189
@@ -200,6 +202,8 @@ class PathRef:
         n = len(kr)
         v = np.full(n, cfg.max_speed)
         v = np.minimum(v, np.sqrt(mu / self.x_b) / np.maximum(kr, 1e-6))          # steady turn: w^2 x_b <= mu
+        if cfg.lat_accel_limit > 0:
+            v = np.minimum(v, np.sqrt(cfg.lat_accel_limit / np.maximum(kr, 1e-6)))
         v = np.maximum(v, cfg.v_min)
         for _ in range(3):
             for i in range(n - 1, -2, -1):
@@ -278,6 +282,7 @@ class BallTracker:
         self.last_seen = -1e9
         self.touch_t = -1e9
         self.rejected = 0
+        self.rej_buf = collections.deque(maxlen=8)       # consecutive rejected images: (time, world position)
 
     # ---- car pose history ----
     def add_pose(self, t, pose, v, w):
@@ -331,8 +336,19 @@ class BallTracker:
         if self.has and t > self.t:
             self._propagate(t)
 
+    def _restart(self, t, zw, sig):
+        """Start (or restart) the estimate from one image.  The snapshots of the old estimate are dropped: rewinding to one of
+        them for the next image would pull the estimate back onto the wrong track and reject every image again."""
+        self.p, self.v, self.t = zw.copy(), np.zeros(2), t
+        self.P = np.diag([sig ** 2, sig ** 2, 0.5 ** 2, 0.5 ** 2])
+        self.snaps.clear()
+        self.snaps.append((t, self.p.copy(), self.v.copy(), self.P.copy()))
+        self.rej_buf.clear()
+
     def update(self, t_meas, z_car):
         """z_car: ball centre in the car frame (x forward, y left) as seen at time t_meas."""
+        if not self.hist:                                 # no car pose yet: the image cannot be placed in the world
+            return
         z_car = np.asarray(z_car, float)
         pose = self.pose_at(t_meas)
         zw = car_to_world(pose[:3], z_car)[0]
@@ -340,10 +356,8 @@ class BallTracker:
         sig = self.cfg.meas_sigma + 0.01 * r * r
         R = np.eye(2) * sig ** 2
         if not self.has:
-            self.p, self.v, self.t = zw.copy(), np.zeros(2), t_meas
-            self.P = np.diag([sig ** 2, sig ** 2, 0.5 ** 2, 0.5 ** 2])
+            self._restart(t_meas, zw, sig)
             self.last_seen, self.has = t_meas, True
-            self.snaps.clear()
             return
         t_now = self.t
         if t_meas < self.t - 1e-6:                       # old image: rewind to the nearest earlier snapshot, then replay
@@ -354,23 +368,33 @@ class BallTracker:
             if snap is None:
                 snap = self.snaps[0] if self.snaps else (self.t, self.p, self.v, self.P)
             self.t, self.p, self.v, self.P = snap[0], snap[1].copy(), snap[2].copy(), snap[3].copy()
+            while self.snaps and self.snaps[-1][0] > snap[0] + 1e-9:     # the timeline after the snapshot is being redone
+                self.snaps.pop()
         self._propagate(max(t_meas, self.t))
         S = self.P[:2, :2] + R
         innov = zw - self.p
         maha = float(innov @ np.linalg.solve(S, innov))
         gone = (t_meas - self.last_seen) > self.cfg.lost_time
+        reacquire = gone
         if maha > self.cfg.gate and not gone:
             self.rejected += 1
+            self.rej_buf.append((t_meas, zw))
+            if len(self.rej_buf) == self.rej_buf.maxlen and (t_meas - self.rej_buf[0][0]) > 0.2:
+                pts = np.array([q for _, q in self.rej_buf])
+                # the images disagree with the estimate but agree with each other: the estimate is the one that is wrong
+                reacquire = float(np.max(np.hypot(*(pts - pts.mean(0)).T))) < 0.12
+            if not reacquire:
+                self._propagate(t_now)
+                return
+        if reacquire:                                     # re-acquire: trust the image, widen the velocity uncertainty
+            self._restart(self.t, zw, sig)
         else:
-            if gone:                                    # re-acquire: trust the image, widen the velocity uncertainty
-                self.p, self.v = zw.copy(), np.zeros(2)
-                self.P = np.diag([sig ** 2, sig ** 2, 0.5 ** 2, 0.5 ** 2])
-            else:
-                K = self.P[:, :2] @ np.linalg.inv(S)
-                x = np.r_[self.p, self.v] + K @ innov
-                self.p, self.v = x[:2], x[2:]
-                self.P = (np.eye(4) - K @ np.eye(4)[:2]) @ self.P
-            self.last_seen = max(self.last_seen, t_meas)
+            K = self.P[:, :2] @ np.linalg.inv(S)
+            x = np.r_[self.p, self.v] + K @ innov
+            self.p, self.v = x[:2], x[2:]
+            self.P = (np.eye(4) - K @ np.eye(4)[:2]) @ self.P
+            self.rej_buf.clear()
+        self.last_seen = max(self.last_seen, t_meas)
         self._propagate(t_now)
 
     # ---- outputs ----

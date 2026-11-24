@@ -20,13 +20,19 @@ BODY_REAR = 0.1651 - 0.58 / 2
 HALF_WIDTH = 0.155
 
 
+EXTRA_SCOOPS = {}      # name -> f(apex_x) -> polyline; lets experiments try other shapes without editing make_scoop
+
+
 def make_scoop(kind='v', apex_x=BODY_FRONT + 0.02, depth=0.14, half_width=0.15, claw_in=0.05):
     """Polyline of points in the car frame (x forward, y left).
 
     'v'    : two straight arms, apex on the centre line, opening forward (self-centring pusher).
     'claw' : the V, but the arm tips curve back inward, so the ball is also held when the car slows down.
     'flat' : a plain bumper (for comparison; the ball slides off sideways).
+    'arc'  : the real printed pusher: a shallow concave arc, R = 160 mm (see below).
     """
+    if kind in EXTRA_SCOOPS:
+        return EXTRA_SCOOPS[kind](apex_x)
     if kind == 'v':
         return np.array([[apex_x + depth, half_width], [apex_x, 0.0], [apex_x + depth, -half_width]])
     if kind == 'claw':
@@ -40,6 +46,19 @@ def make_scoop(kind='v', apex_x=BODY_FRONT + 0.02, depth=0.14, half_width=0.15, 
         return np.array([[a + 0.20, fl], [a + 0.07, ch], [a, ch], [a, -ch], [a + 0.07, -ch], [a + 0.20, -fl]])
     if kind == 'flat':
         return np.array([[apex_x, half_width], [apex_x, -half_width]])
+    if kind == 'vnarrow':
+        # the printed narrow-V pusher (ball_pusher_V_narrow_v1.stl): two straight walls, inner faces from the tip (apex_x) to +-0.10 m at
+        # 0.20 m ahead (half angle 26.6 deg).  The ball centre sits 0.075 m ahead of the tip (rider_x handles 3-point V shapes).
+        return np.array([[apex_x + 0.20, 0.10], [apex_x, 0.0], [apex_x + 0.20, -0.10]])
+    if kind == 'arc':
+        # The printed pusher (ball_pusher_clamp_v1.stl, 240 x 145 x 40 mm): a block whose front edge is a SHALLOW CONCAVE ARC,
+        # radius 160.6 mm, 34.9 mm deep over +-100 mm, then flat out to +-120 mm.  No side walls: the ball is only held by the slope
+        # of the arc (a ball 33.5 mm in radius sits at the bottom, apex_x = arc bottom).
+        R, half, ext = 0.1606, 0.100, 0.120
+        lat = np.linspace(half, -half, 41)
+        fwd = apex_x + (R - np.sqrt(R * R - lat * lat))
+        top = apex_x + (R - math.sqrt(R * R - half * half))
+        return np.vstack([[top, ext], np.column_stack([fwd, lat]), [top, -ext]])
     raise ValueError(kind)
 
 

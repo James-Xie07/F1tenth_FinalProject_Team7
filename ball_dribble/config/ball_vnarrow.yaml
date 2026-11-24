@@ -1,0 +1,24 @@
+# Real car with the printed narrow-V pusher (ball_pusher_V_narrow_v1/v2).  Use decimal points on every float.
+# Differences from ball.yaml: scoop model = narrow V, centred path, tighter ball colour, slower start.
+ball_push_node:
+  ros__parameters:
+    odom_topic: "/pf/pose/odom"
+    speed_topic: "/odom"
+    odom_is_laser_pose: true
+    lidar_offset_x: 0.27
+    waypoint_file: "ball_path_levine2nd.csv"   # centred in the corridor (levine_ball_path.csv hugs a wall: 2 cm at the closest point)
+    scoop_kind: "vnarrow"
+    scoop_apex_x: 0.510        # V tip = measured ball centre 0.585 m (rear axle to ball centre, ball seated in V) minus 0.075
+    max_speed: 0.3
+    search_speed: 0.0          # do not drive on when the ball is not seen
+    ball_roll_decel: 0.30      # PLACEHOLDER: measure with scripts/calibrate_ball.py, use ~0.8 x the result
+ball_detector_node:
+  ros__parameters:
+    cam_x: 0.39                # measured: lens 39 cm ahead of the rear axle
+    cam_y: 0.04               # measured 4 cm off the centreline; LEFT (ball seated at y=0 appears right of image centre)
+    cam_z: 0.10                # measured: lens centre 10 cm above floor
+    cam_pitch_deg: 7.0         # fitted from ball seated in V (5-8 deg); verify with tape-measured ball at 0.8 / 1.2 m
+    h_min: 20
+    h_max: 48
+    s_min: 70                  # was 58: the dark wall trim (HSV ~24,64,40) passed and was taken for the ball
+    v_min: 70                  # was 23

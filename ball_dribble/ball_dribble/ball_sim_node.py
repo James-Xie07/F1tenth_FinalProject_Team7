@@ -13,6 +13,7 @@ The ball is a rolling disc with constant deceleration; the car carries the same 
 assumes (ball_dribble/physics.py). The gym itself does not know about the ball or the scoop: only the ball sees them.
 
 Parameters: ball_roll_decel (truth, make it different from the controller's value to test robustness), scoop_kind,
+max_odom_gap (the ball is stepped on every odom message by the gap since the previous one, but at most this long [s]),
 odom_offset_x (how far ahead of the rear axle the gym odom point is; gym_ros reports roughly the centre of mass, ~0.17 m),
 start_ahead (spawn the ball this far ahead of the rear axle on the first odom), camera_* values.
 """
@@ -26,7 +27,6 @@ from nav_msgs.msg import Odometry, OccupancyGrid
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from visualization_msgs.msg import Marker
-from std_msgs.msg import Float32
 
 from ball_dribble.mapwalls import MapWalls
 from ball_dribble.physics import (BallParams, Camera, CameraParams, ball_step, car_to_world, car_velocity_field,
@@ -39,8 +39,7 @@ class BallSimNode(Node):
         params = dict(odom_topic='/ego_racecar/odom', map_topic='/map', ball_topic='/ball/position', global_frame='map',
                       odom_offset_x=0.17, scoop_kind='channel', ball_roll_decel=0.35, ball_radius=0.033,
                       start_ahead=0.0, physics_rate=200.0, camera_rate=30.0, camera_x=0.15, camera_min_range=0.28,
-                      camera_latency=0.07, camera_p_detect=0.97, seed=0,
-                      publish_synthetic_depth=False, contact_depth=0.29, depth_topic='/ball/camera_depth')
+                      camera_latency=0.07, camera_p_detect=0.97, max_odom_gap=0.025, seed=0)
         for k, v in params.items():
             self.declare_parameter(k, v)
         self.p = {k: self.get_parameter(k).value for k in params}
@@ -50,6 +49,7 @@ class BallSimNode(Node):
                                           latency=float(self.p['camera_latency']), p_detect=float(self.p['camera_p_detect']),
                                           rate=float(self.p['camera_rate'])), seed=int(self.p['seed']))
         self.walls = None
+        self.odom_stamp = None    # header stamp of the last odom [s]
         self.odom = None          # (t_rx, x, y, yaw, v, yaw_rate) with (x, y) already at the rear axle
         self.ball = None          # world position
         self.vel = np.zeros(2)
@@ -57,8 +57,6 @@ class BallSimNode(Node):
         self.pending = deque()    # (release_time, capture_time, (x, y))
         self.last_step = None
         self.pub = self.create_publisher(PointStamped, self.p['ball_topic'], 1)
-        self.depth_pub = (self.create_publisher(Float32, self.p['depth_topic'], 1)
-                          if self.p['publish_synthetic_depth'] else None)
         self.truth_pub = self.create_publisher(PointStamped, '~/truth', 1)
         self.marker_pub = self.create_publisher(Marker, '~/marker', 1)
         qos = QoSProfile(history=HistoryPolicy.KEEP_LAST, depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
@@ -67,7 +65,6 @@ class BallSimNode(Node):
                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(OccupancyGrid, self.p['map_topic'], self.map_callback, map_qos)
         self.create_subscription(PointStamped, '/clicked_point', self.clicked_callback, 10)
-        self.create_timer(1.0 / float(self.p['physics_rate']), self.physics_callback)
         self.create_timer(1.0 / float(self.p['camera_rate']), self.camera_callback)
         self.get_logger().info('ball_sim_node ready: waiting for the map and the first odom')
 
@@ -85,6 +82,14 @@ class BallSimNode(Node):
         x = msg.pose.pose.position.x - off * math.cos(yaw)
         y = msg.pose.pose.position.y - off * math.sin(yaw)
         self.odom = (self.now(), x, y, yaw, float(msg.twist.twist.linear.x), float(msg.twist.twist.angular.z))
+        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        prev, self.odom_stamp = self.odom_stamp, stamp
+        if self.ball is not None and prev is not None:
+            # The ball lives on the gym's clock: it is stepped here, with the pose this message carries, never with a pose
+            # extrapolated from an old message.  When the gym (or this machine) stalls the car does not move on (one step over a
+            # stall of half a second), so the ball must not roll on either: a gap counts for at most max_odom_gap.  (A ball stepped
+            # on a wall clock rolled ahead of the stalled scoop and slid out of it.)
+            self.advance(min(max(stamp - prev, 1e-4), float(self.p['max_odom_gap'])))
         if self.ball is None:                                   # first odom: put the ball in front of the scoop
             xb = rider_x(self.scoop, self.prm.radius) + float(self.p['start_ahead'])
             self.ball = np.array([x + xb * math.cos(yaw), y + xb * math.sin(yaw)])
@@ -97,17 +102,11 @@ class BallSimNode(Node):
         self.get_logger().info(f'ball placed at ({msg.point.x:.2f}, {msg.point.y:.2f})')
 
     def car_pose_now(self):
-        """Last odom pose advanced by dead reckoning to the current time (odom arrives slower than the physics)."""
+        """The pose of the last odom message (the ball and the camera use the same pose, so they stay consistent)."""
         t0, x, y, yaw, v, w = self.odom
-        dt = min(max(self.now() - t0, 0.0), 0.1)
-        return (x + v * math.cos(yaw) * dt, y + v * math.sin(yaw) * dt, yaw + w * dt), v, w
+        return (x, y, yaw), v, w
 
-    def physics_callback(self):
-        if self.odom is None or self.ball is None:
-            return
-        t = self.now()
-        dt = 1.0 / float(self.p['physics_rate']) if self.last_step is None else min(max(t - self.last_step, 1e-4), 0.05)
-        self.last_step = t
+    def advance(self, dt):
         pose, v, w = self.car_pose_now()
         self.ball, self.vel, touching = ball_step(self.ball, self.vel, dt, self.prm, car_to_world(pose, self.scoop),
                                                   car_velocity_field(pose, v, w), self.walls)
@@ -128,14 +127,6 @@ class BallSimNode(Node):
             msg.header.frame_id = 'rear_axle'
             msg.point.x, msg.point.y, msg.point.z = float(z[0]), float(z[1]), float(self.prm.radius)
             self.pub.publish(msg)
-            if self.depth_pub is not None:
-                # Test-only calibrated synthetic depth: 0.29 m at the scoop's
-                # simulated pushing point; a ball farther forward has larger depth.
-                # This is deliberately not an optical projection of the D435i.
-                nominal_x = rider_x(self.scoop, self.prm.radius)
-                simulated_depth = float(self.p['contact_depth']) + float(z[0]) - nominal_x
-                if 0.18 <= simulated_depth <= 4.0:
-                    self.depth_pub.publish(Float32(data=simulated_depth))
         tr = PointStamped()
         tr.header.stamp = self.get_clock().now().to_msg()
         tr.header.frame_id = self.p['global_frame']

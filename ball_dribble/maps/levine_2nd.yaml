@@ -1,0 +1,7 @@
+image: levine_2nd.png
+resolution: 0.05
+origin: [-15.174, -43.331, 0.0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
+centerline: levine_2nd_centerline.csv

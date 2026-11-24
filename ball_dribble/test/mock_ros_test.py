@@ -53,7 +53,7 @@ class PointStamped:
     def __init__(self): self.header = ns(stamp=None, frame_id=''); self.point = ns(x=0, y=0, z=0)
 mod('geometry_msgs'); mod('geometry_msgs.msg', PointStamped=PointStamped)
 mod('nav_msgs'); mod('nav_msgs.msg', Odometry=object, OccupancyGrid=object)
-mod('std_msgs'); mod('std_msgs.msg', String=lambda data='': ns(data=data), Float32=lambda data=0.: ns(data=data))
+mod('std_msgs'); mod('std_msgs.msg', String=lambda data='': ns(data=data))
 mod('visualization_msgs'); mod('visualization_msgs.msg', Marker=Marker)
 
 import ball_dribble.ball_push_node as bpn

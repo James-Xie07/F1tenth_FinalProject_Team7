@@ -27,7 +27,6 @@ from message_filters import ApproximateTimeSynchronizer, Subscriber
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CameraInfo, Image
-from std_msgs.msg import Float32
 
 
 def make_mask(bgr, h_min, h_max, s_min, v_min):
@@ -108,8 +107,6 @@ class BallDetector(Node):
         self.pitch = math.radians(float(self.p['cam_pitch_deg']))
         self.mount = (float(self.p['cam_x']), float(self.p['cam_y']), float(self.p['cam_z']))
         self.pub = self.create_publisher(PointStamped, self.p['output_topic'], 1)
-        # Optical-axis surface depth, independent of rear_axle ball coordinates.
-        self.depth_pub = self.create_publisher(Float32, '/ball/camera_depth', 1)
         self.dbg = self.create_publisher(Image, '~/debug_image', 1)
         qos = QoSProfile(history=HistoryPolicy.KEEP_LAST, depth=5, reliability=ReliabilityPolicy.BEST_EFFORT)
         self.create_subscription(CameraInfo, self.p['info_topic'], self.info_callback, qos)
@@ -144,7 +141,6 @@ class BallDetector(Node):
                 msg.header.frame_id = p['frame']
                 msg.point.x, msg.point.y, msg.point.z = float(pt[0]), float(pt[1]), float(pt[2])
                 self.pub.publish(msg)
-                self.depth_pub.publish(Float32(data=float(z_surface)))
                 if out is not None:
                     cv2.circle(out, (cx, cy), int(round(r)), (0, 255, 0), 2)
                     cv2.putText(out, f'x={pt[0]:.2f} y={pt[1]:+.2f}', (cx + 6, cy - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
