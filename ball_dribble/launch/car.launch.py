@@ -14,7 +14,9 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('params_file', default_value=cfg, description='Detector and controller YAML'),
         DeclareLaunchArgument('reacquire_enabled', default_value='false', description='Enable the directional search arc'),
-        Node(package='ball_dribble', executable='ball_detector_node', output='screen', parameters=[params]),
+        DeclareLaunchArgument('allow_clipped_ball', default_value='false', description='Try fitting partly clipped balls'),
+        Node(package='ball_dribble', executable='ball_detector_node', output='screen', parameters=[
+            params, {'allow_clipped_ball': ParameterValue(LaunchConfiguration('allow_clipped_ball'), value_type=bool)}]),
         Node(package='ball_dribble', executable='ball_push_node', output='screen', parameters=[
             params, {'reacquire_enabled': ParameterValue(LaunchConfiguration('reacquire_enabled'), value_type=bool)}]),
     ])

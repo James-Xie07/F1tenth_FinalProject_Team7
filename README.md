@@ -36,4 +36,18 @@ does not check live LiDAR obstacles. It stays stopped without a usable map or
 recent off-center observation. The `reacquire_camera_x/y` settings match
 the horizontal camera offsets in the corresponding real-car profile.
 
+### Ball missing from the detector
+
+Check `/ball_detector_node/debug_image` while the ball is seated and as it moves
+left and right. The overlay distinguishes a color candidate touching the image
+boundary, a candidate with invalid depth, and no compact color candidate.
+Watch `/ball/position` to check which frames have usable 3D detections.
+
+If the ball is clipped by the left or right edge, try the optional
+`allow_clipped_ball:=true` argument on `car.launch.py`. A clipped candidate
+needs a visible arc from approximately half the ball and a depth consistent
+with a tennis ball. Move or re-aim the camera if most of the ball is outside
+the frame or the scoop blocks it. Keep `cam_y` and `reacquire_camera_y` aligned
+with the measured lateral offset when changing the mount.
+
 See the [package README](ball_dribble/README.md) for the original project notes.
