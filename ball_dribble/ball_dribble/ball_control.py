@@ -8,7 +8,7 @@ The car pushes a small ball around the track with a V-shaped scoop on its front.
   BallTracker a Kalman filter on the ball in the WORLD frame.  Its motion model is rolling friction plus contact with
               the scoop, so while the ball sits in the depth camera's blind zone (inside the scoop) the estimate keeps
               riding with the car instead of vanishing.  Handles camera latency by rewinding to the image time.
-  BallPusher  the state machine.  PUSH: Stanley steering with the scoop point as control point, speed from the profile.
+  BallPusher  the state machine. PUSH: MPC or Stanley tracks the ball path and follows the speed profile.
               APPROACH: line-Stanley onto the line "behind the ball, pointing along the path", speed matched to the
               ball.  CHASE: follow the path to a ball that rolled away (a ball behind the car is reached by going round
               the loop).  SEARCH: follow the path slowly until the ball is seen again.
@@ -23,12 +23,14 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from .physics import (BODY_FRONT, BallParams, ball_step, car_to_world, car_velocity_field, make_scoop, rider_x, world_to_car, wrap)
+from .push_mpc import MPCConfig, TrackingMPC, push_reference
 
 
 @dataclass
 class Config:
     # ---- path and speed profile ----
     path_file: str = 'ball_path.csv'
+    push_controller: str = 'stanley'   # launch profiles opt into 'mpc'; standalone experiments retain their baseline
     max_speed: float = 2.5             # [m/s]
     v_min: float = 0.6
     speed_up: float = 1.0              # speed ramp while pushing [m/s^2]
@@ -72,6 +74,8 @@ class Config:
     lost_time: float = 1.2             # not seen for this long and not in contact -> lost [s]
 
     def __post_init__(self):
+        if self.push_controller not in ('mpc', 'stanley'):
+            raise ValueError("push_controller must be 'mpc' or 'stanley'")
         if not (0.2 <= self.hold_margin <= 1.0) or self.max_speed <= 0 or self.ball_roll_decel <= 0:
             raise ValueError('hold_margin must be in 0.2..1, speeds and ball_roll_decel must be positive')
 
@@ -409,7 +413,7 @@ class BallTracker:
 # Controller
 # =============================================================================================
 class BallPusher:
-    def __init__(self, cfg=None, walls=None):
+    def __init__(self, cfg=None, walls=None, control_period=0.05):
         """walls: optional object with dist(x, y) = distance to the nearest wall [m] (from the map); enables the staged approach."""
         self.cfg = cfg or Config()
         self.walls = walls
@@ -418,6 +422,18 @@ class BallPusher:
         self.scoop = make_scoop(self.cfg.scoop_kind, apex_x=self.cfg.scoop_apex_x)
         self.apex = float(self.scoop[:, 0].min())
         self.rider = rider_x(self.scoop, self.cfg.ball_radius)                   # where a pushed ball's centre sits
+        self.push_mpc = None
+        if self.cfg.push_controller == 'mpc':
+            if not math.isfinite(control_period) or control_period <= 0:
+                raise ValueError('control_period must be positive and finite')
+            defaults = MPCConfig()
+            self.push_mpc = TrackingMPC(MPCConfig(
+                dt=control_period,
+                horizon=max(2, round(defaults.dt * defaults.horizon / control_period)),
+                wheelbase=self.cfg.wheelbase,
+                max_speed=min(self.cfg.max_speed, defaults.max_speed),
+                max_steer=min(self.cfg.max_steer, defaults.max_steer),
+            ))
         self.v_cmd = 0.0
         self.steer_cmd = 0.0
         self.mode = 'SEARCH'
@@ -492,7 +508,7 @@ class BallPusher:
         self.last_t = t
         tr.add_pose(t_pose, pose, v, yaw_rate)
         tr.predict_to(t)
-        pc, _ = self.act.predict(pose, v, t_pose, t + cfg.lead, (self.v_cmd, self.steer_cmd))   # pose when this command acts
+        pc, predicted_speed = self.act.predict(pose, v, t_pose, t + cfg.lead, (self.v_cmd, self.steer_cmd))
         in_contact = tr.contact(t)
         F = car_to_world(pc, np.array([[self.apex, 0.0]]))[0]                     # scoop apex in the world
         rider = car_to_world(pc, np.array([[self.rider, 0.0]]))[0]
@@ -504,16 +520,39 @@ class BallPusher:
         held = in_contact or near
         lost = (not tr.has) or ((t - tr.last_seen) > cfg.lost_time and not held)
         steer = 0.0
+        steer_rate = cfg.steer_rate_limit
         v_target, down = 0.0, cfg.approach_decel
         mode = 'SEARCH' if lost else ('PUSH' if held else 'APPROACH')
+        if self.push_mpc is not None and self.mode == 'PUSH' and mode != 'PUSH':
+            self.push_mpc.reset()
 
         if mode == 'PUSH':
-            steer, (s, e, psi, kap, vref) = self._stanley(rider, pc[2], v)
+            progress = self.path.project(rider)
+            s, e, _, kap, vref = progress
             ahead = self.path.at(s + max(0.0, v) * cfg.lead + 0.2)[3]
             kr = float(self.path.rear_curvature(kap))
             down = max(0.03, self.path.budget() - (max(v, 0.0) * kr) ** 2 * self.path.x_b)    # what the ball can follow right now
             v_target = min(vref, ahead) / (1.0 + 2.5 * max(0.0, abs(e) - 0.05))     # ball off the path: go gently until it is back
             up = cfg.speed_up
+            if self.push_mpc is None:
+                steer, _ = self._stanley(rider, pc[2], v, s_proj=progress)
+            else:
+                mpc = self.push_mpc
+                try:
+                    ref = push_reference(self.path, mpc.cfg, s, pc[2], v_target)
+                    v_target, steer = mpc.solve(
+                        [pc[0], pc[1], predicted_speed, pc[2]], ref, self.steer_cmd, float(bc[1]),
+                    )
+                except Exception:
+                    # The ROS node publishes zero on a control error. Keep its
+                    # next actuator prediction consistent with that command.
+                    mpc.reset()
+                    self.v_cmd = self.steer_cmd = 0.0
+                    self.act.add(t, 0.0, 0.0)
+                    raise
+                up = min(up, mpc.cfg.max_accel)
+                down = min(down, mpc.cfg.max_brake)
+                steer_rate = min(steer_rate, mpc.cfg.max_steer_rate)
         elif mode == 'APPROACH':
             w = tr.v
             sp = float(np.hypot(*w))
@@ -578,9 +617,11 @@ class BallPusher:
             v_target = cfg.search_speed if tr.has else 0.0
             up = 0.8
 
-        self._slew(max(v_target, 0.0), dt, up if mode != 'PUSH' else cfg.speed_up, down)
+        self._slew(max(v_target, 0.0), dt, up, down)
+        if mode == 'PUSH' and self.push_mpc is not None:
+            self.v_cmd = min(self.v_cmd, self.push_mpc.cfg.max_speed)
         steer = float(np.clip(steer, -cfg.max_steer, cfg.max_steer))
-        step = cfg.steer_rate_limit * dt
+        step = steer_rate * dt
         self.steer_cmd = float(np.clip(steer, self.steer_cmd - step, self.steer_cmd + step))
         self.act.add(t, self.v_cmd, self.steer_cmd)
         self.mode = mode

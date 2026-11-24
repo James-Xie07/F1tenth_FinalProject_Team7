@@ -21,7 +21,7 @@ def run(cfg=None, scoop='channel', seed=0, t_max=70.0, ball_prm=None, car_prm=No
     cfg = cfg or Config()
     cfg.scoop_kind = scoop
     track = get_track()
-    pusher = BallPusher(cfg, walls=track)
+    pusher = BallPusher(cfg, walls=track, control_period=control_period)
     path = pusher.path
     rng = np.random.default_rng(seed)
     ball_prm = ball_prm or BallParams()

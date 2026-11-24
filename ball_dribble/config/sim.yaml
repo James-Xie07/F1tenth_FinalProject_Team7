@@ -7,6 +7,7 @@ ball_sim_node:
     start_ahead: 0.0           # spawn the ball resting in the scoop; use rviz "Publish Point" to move it
 ball_push_node:
   ros__parameters:
+    push_controller: "mpc"
     odom_topic: "/ego_racecar/odom"
     speed_topic: ""            # take the speed from the odom twist
     odom_is_laser_pose: false  # bridge odom is the rear axle, not the lidar

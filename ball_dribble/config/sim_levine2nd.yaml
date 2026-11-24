@@ -7,6 +7,7 @@ ball_sim_node:
     start_ahead: 0.0
 ball_push_node:
   ros__parameters:
+    push_controller: "mpc"
     odom_topic: /ego_racecar/odom
     speed_topic: ''
     odom_is_laser_pose: false

@@ -70,7 +70,7 @@ class BallPushNode(Node):
         kw = {name: type(defaults[name])(p[name]) for name in defaults}
         kw['path_file'] = str(filename)
         self.cfg = Config(**kw)
-        self.pusher = BallPusher(self.cfg)
+        self.pusher = BallPusher(self.cfg, control_period=float(p['control_period']))
         self.p = p
         self.enabled = bool(p['enable'])
         self.lock = RLock()
@@ -99,7 +99,7 @@ class BallPushNode(Node):
         self.get_logger().info(
             f'ball_push_node ready: path {self.pusher.path.length:.2f} m from {filename}, scoop={self.cfg.scoop_kind}, '
             f'ball_roll_decel={self.cfg.ball_roll_decel:.2f} m/s^2 (MEASURE IT), max_speed={self.cfg.max_speed:.1f} m/s, '
-            f'enable={self.enabled}')
+            f'push={self.cfg.push_controller}, enable={self.enabled}')
 
     # ------------------------------------------------------------------ time helpers
     def now(self):
