@@ -10,6 +10,9 @@ class MapWalls:
 
     def __init__(self, msg, occupied_threshold=65, unknown_is_wall=True):
         w, h, self.res = msg.info.width, msg.info.height, msg.info.resolution
+        if w <= 0 or h <= 0 or not math.isfinite(self.res) or self.res <= 0.0:
+            raise ValueError('invalid map dimensions or resolution')
+        self.unknown_is_wall = unknown_is_wall
         data = np.asarray(msg.data, dtype=np.int16).reshape(h, w)
         occupied = (data >= occupied_threshold) | ((data < 0) if unknown_is_wall else False)
         self.field = ndimage.distance_transform_edt(~occupied) * self.res
@@ -26,7 +29,12 @@ class MapWalls:
         col = (c * dx + s * dy) / self.res - 0.5
         row = (-s * dx + c * dy) / self.res - 0.5          # OccupancyGrid row 0 is the lowest y (no image flip)
         out = ndimage.map_coordinates(self.field, [row.ravel(), col.ravel()], order=1, mode='nearest')
-        return out.reshape(x.shape)
+        out = out.reshape(x.shape)
+        if self.unknown_is_wall:
+            h, w = self.field.shape
+            boundary = np.minimum.reduce((col + 0.5, w - 0.5 - col, row + 0.5, h - 0.5 - row))
+            out = np.minimum(out, np.maximum(0.0, boundary) * self.res)
+        return out
 
     def grad(self, x, y, h=0.02):
         gx = (self.dist(x + h, y) - self.dist(x - h, y)) / (2 * h)

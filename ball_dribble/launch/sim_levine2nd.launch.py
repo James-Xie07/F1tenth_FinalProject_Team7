@@ -21,6 +21,7 @@ def generate_launch_description():
         DeclareLaunchArgument('open_foxglove', default_value='false', description='open Foxglove in the browser'),
         DeclareLaunchArgument('max_speed', default_value='0.8', description='0.8 m/s: 5 of 5 clean laps; 1.0 m/s failed 1 of 2; the real car config (ball.yaml) uses 0.5'),
         DeclareLaunchArgument('lat_accel_limit', default_value='0.0', description='lateral acceleration cap in turns [m/s^2], 0 = off; with it max_speed is the straight-line speed'),
+        DeclareLaunchArgument('reacquire_enabled', default_value='false', description='Enable the directional search arc'),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(gym, 'launch', 'gym_bridge_launch.py')),
             launch_arguments={'config': os.path.join(share, 'config', 'gym_levine2nd.yaml'),
@@ -31,5 +32,6 @@ def generate_launch_description():
              parameters=[{'waypoint_file': 'ball_path_levine2nd.csv'}]),          # big ball + path line for Foxglove, display only
         Node(package='ball_dribble', executable='ball_push_node', output='screen',
              parameters=[sim_cfg, {'max_speed': ParameterValue(LaunchConfiguration('max_speed'), value_type=float),
-                                    'lat_accel_limit': ParameterValue(LaunchConfiguration('lat_accel_limit'), value_type=float)}]),
+                                    'lat_accel_limit': ParameterValue(LaunchConfiguration('lat_accel_limit'), value_type=float),
+                                    'reacquire_enabled': ParameterValue(LaunchConfiguration('reacquire_enabled'), value_type=bool)}]),
     ])

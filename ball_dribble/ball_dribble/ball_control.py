@@ -11,7 +11,7 @@ The car pushes a small ball around the track with a V-shaped scoop on its front.
   BallPusher  the state machine. PUSH: MPC or Stanley tracks the ball path and follows the speed profile.
               APPROACH: line-Stanley onto the line "behind the ball, pointing along the path", speed matched to the
               ball.  CHASE: follow the path to a ball that rolled away (a ball behind the car is reached by going round
-              the loop).  SEARCH: follow the path slowly until the ball is seen again.
+              the loop). SEARCH: follow the path or, when enabled, try a bounded arc toward the last observation.
 
 Frames: car frame = rear axle origin, x forward, y left (same convention as the Frenet MPC node).
 """
@@ -22,7 +22,8 @@ from dataclasses import dataclass, fields
 import numpy as np
 from scipy.spatial import cKDTree
 
-from .physics import (BODY_FRONT, BallParams, ball_step, car_to_world, car_velocity_field, make_scoop, rider_x, world_to_car, wrap)
+from .physics import (BODY_FRONT, BallParams, ball_step, car_to_world, car_velocity_field, footprint_points,
+                      make_scoop, rider_x, world_to_car, wrap)
 from .push_mpc import MPCConfig, TrackingMPC, push_reference
 
 
@@ -56,6 +57,13 @@ class Config:
     approach_speed: float = 0.7
     touch_speed: float = 0.15          # speed over the ball's own speed at the moment of contact (a soft scoop can take more)
     search_speed: float = 0.8          # speed while the ball is not seen
+    reacquire_enabled: bool = False
+    reacquire_speed: float = 0.12      # [m/s]
+    reacquire_distance: float = 0.30   # [m] total travel budget, including room to brake
+    reacquire_max_age: float = 4.0     # [s] maximum age of the last accepted image, including lost_time
+    reacquire_clearance: float = 0.12  # [m] minimum mapped wall clearance of the car and scoop
+    reacquire_camera_x: float = 0.15   # camera position relative to the rear axle [m]
+    reacquire_camera_y: float = 0.0
     approach_decel: float = 1.5
     chase_speed: float = 1.6           # speed while driving to a ball that is not in the scoop (car-only limits apply)
     chase_lat_accel: float = 1.5
@@ -78,6 +86,13 @@ class Config:
             raise ValueError("push_controller must be 'mpc' or 'stanley'")
         if not (0.2 <= self.hold_margin <= 1.0) or self.max_speed <= 0 or self.ball_roll_decel <= 0:
             raise ValueError('hold_margin must be in 0.2..1, speeds and ball_roll_decel must be positive')
+        if self.reacquire_enabled:
+            limits = (self.reacquire_speed, self.reacquire_distance, self.reacquire_max_age,
+                      self.reacquire_clearance, self.approach_decel, self.wheelbase, self.max_steer)
+            if not all(math.isfinite(value) and value > 0.0 for value in limits) or self.reacquire_max_age <= self.lost_time:
+                raise ValueError('reacquisition needs positive limits and reacquire_max_age greater than lost_time')
+            if not math.isfinite(self.reacquire_camera_x) or not math.isfinite(self.reacquire_camera_y):
+                raise ValueError('reacquisition camera offsets must be finite')
 
 
 def advance_pose(pose, v, steer, dt, wheelbase, steps=4):
@@ -284,6 +299,7 @@ class BallTracker:
         self.P = np.diag([1.0, 1.0, 1.0, 1.0])
         self.snaps = collections.deque(maxlen=80)
         self.last_seen = -1e9
+        self.last_observation = None     # accepted image position in the map, before filtering or prediction
         self.touch_t = -1e9
         self.rejected = 0
         self.rej_buf = collections.deque(maxlen=8)       # consecutive rejected images: (time, world position)
@@ -344,6 +360,7 @@ class BallTracker:
         """Start (or restart) the estimate from one image.  The snapshots of the old estimate are dropped: rewinding to one of
         them for the next image would pull the estimate back onto the wrong track and reject every image again."""
         self.p, self.v, self.t = zw.copy(), np.zeros(2), t
+        self.touch_t = -1e9             # contact from the discarded estimate no longer applies
         self.P = np.diag([sig ** 2, sig ** 2, 0.5 ** 2, 0.5 ** 2])
         self.snaps.clear()
         self.snaps.append((t, self.p.copy(), self.v.copy(), self.P.copy()))
@@ -362,6 +379,7 @@ class BallTracker:
         if not self.has:
             self._restart(t_meas, zw, sig)
             self.last_seen, self.has = t_meas, True
+            self.last_observation = zw
             return
         t_now = self.t
         if t_meas < self.t - 1e-6:                       # old image: rewind to the nearest earlier snapshot, then replay
@@ -398,7 +416,9 @@ class BallTracker:
             self.p, self.v = x[:2], x[2:]
             self.P = (np.eye(4) - K @ np.eye(4)[:2]) @ self.P
             self.rej_buf.clear()
-        self.last_seen = max(self.last_seen, t_meas)
+        if t_meas >= self.last_seen:
+            self.last_seen = t_meas
+            self.last_observation = zw
         self._propagate(t_now)
 
     # ---- outputs ----
@@ -440,6 +460,10 @@ class BallPusher:
         self.last_t = None
         self.act = ActuatorModel(self.cfg)
         self._psi_prev = None
+        self._search_seen = -math.inf
+        self._search_finished = False
+        self._search_arc = None
+        self._search_footprint = footprint_points(self.scoop) if self.cfg.reacquire_enabled else None
         self.info = {}
 
     def observe(self, t_meas, z_car):
@@ -494,6 +518,58 @@ class BallPusher:
         self._psi_prev = best[4]
         return best[1], best[2], best[3]
 
+    def _reacquire(self, t, pose, predicted_pose, v):
+        """One forward arc per loss, aimed at the last accepted observation."""
+        cfg, tracker = self.cfg, self.tracker
+        if tracker.last_observation is None:
+            return 0.0, 0.0
+        if tracker.last_seen > self._search_seen:
+            self._search_seen = tracker.last_seen
+            self._search_finished = False
+            self._search_arc = None
+        if self._search_finished:
+            return 0.0, 0.0
+        if self.walls is None or t - self._search_seen >= cfg.reacquire_max_age:
+            self._search_finished = True
+            return 0.0, 0.0
+
+        x, y = world_to_car(predicted_pose, tracker.last_observation)[0]
+        bearing = math.atan2(y - cfg.reacquire_camera_y, x - cfg.reacquire_camera_x)
+        if self._search_arc is None:
+            if max(abs(v), abs(self.v_cmd)) > 0.04 or abs(self.steer_cmd) > 0.05:
+                return 0.0, 0.0  # cancel the last maneuver and settle before picking a direction
+            self._search_arc = (t, np.asarray(pose[:2]), math.copysign(cfg.max_steer, bearing))
+
+        started, origin, steer = self._search_arc
+        speed = min(cfg.reacquire_speed, cfg.max_speed)
+        remaining = cfg.reacquire_distance - float(np.linalg.norm(np.asarray(pose[:2]) - origin))
+        braking_speed = max(speed, abs(v), self.v_cmd)
+        brake_room = braking_speed * (cfg.lead + cfg.speed_tau) + braking_speed ** 2 / (2 * cfg.approach_decel)
+        if (x <= self.apex + cfg.ball_radius or bearing * math.copysign(1.0, steer) <= 0.10
+                or remaining <= brake_room or t - started >= cfg.reacquire_distance / speed):
+            self._search_finished = True
+            return 0.0, 0.0
+
+        end_pose = advance_pose(predicted_pose, remaining - brake_room, steer, 1.0, cfg.wheelbase)
+        end_x, end_y = world_to_car(end_pose, tracker.last_observation)[0]
+        end_bearing = math.atan2(end_y - cfg.reacquire_camera_y, end_x - cfg.reacquire_camera_x)
+        if abs(end_bearing) >= abs(bearing):
+            self._search_finished = True
+            return 0.0, 0.0
+
+        # Include straight and intermediate steering while the servo turns.
+        distances = np.linspace(0.0, remaining, math.ceil(remaining / 0.03) + 1)
+        swept = np.concatenate([
+            car_to_world(advance_pose(predicted_pose, distance, angle, 1.0, cfg.wheelbase),
+                         self._search_footprint)
+            for angle in (0.0, 0.5 * steer, steer) for distance in distances
+        ])
+        clearance = self.walls.dist(*swept.T)
+        if not np.all(np.isfinite(clearance) & (clearance >= cfg.reacquire_clearance)):
+            self._search_finished = True
+            return 0.0, 0.0
+        return speed, steer
+
     def _slew(self, target, dt, up, down):
         if target > self.v_cmd:
             self.v_cmd = min(target, self.v_cmd + up * dt)
@@ -518,7 +594,8 @@ class BallPusher:
             bc = world_to_car(pc, tr.p)[0]
             near = (self.apex - 0.04 < bc[0] < self.apex + 0.25) and abs(bc[1]) < 0.20
         held = in_contact or near
-        lost = (not tr.has) or ((t - tr.last_seen) > cfg.lost_time and not held)
+        waiting_for_image = cfg.reacquire_enabled and tr.last_seen <= self._search_seen
+        lost = (not tr.has) or waiting_for_image or ((t - tr.last_seen) > cfg.lost_time and not held)
         steer = 0.0
         steer_rate = cfg.steer_rate_limit
         v_target, down = 0.0, cfg.approach_decel
@@ -613,8 +690,13 @@ class BallPusher:
             elif mode == 'CHASE':
                 down = cfg.chase_brake
         else:  # SEARCH
-            steer, (s, e, psi, kap, vref) = self._stanley(F, pc[2], v)
-            v_target = cfg.search_speed if tr.has else 0.0
+            if cfg.reacquire_enabled:
+                v_target, steer = self._reacquire(t, pose, pc, v)
+                if v_target > 0.0:
+                    mode = 'REACQUIRE'
+            else:
+                steer, _ = self._stanley(F, pc[2], v)
+                v_target = cfg.search_speed if tr.has else 0.0
             up = 0.8
 
         self._slew(max(v_target, 0.0), dt, up, down)

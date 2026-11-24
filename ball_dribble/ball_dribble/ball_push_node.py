@@ -10,7 +10,7 @@ All control logic lives in ball_control.py (ROS-free, tested in the simulator in
                                          the camera image time (the tracker corrects for the camera delay with it).
               /map                       occupancy grid -> wall distance field (used to plan the approach to a ball that rolled away)
   publishes   /drive                     ackermann_msgs/AckermannDriveStamped
-              ~/mode                     std_msgs/String   PUSH / APPROACH / CHASE / SEARCH
+              ~/mode                     std_msgs/String   PUSH / APPROACH / CHASE / SEARCH / REACQUIRE
               ~/ball                     visualization_msgs/Marker   estimated ball (green = held, yellow = rolling, red = lost)
 
 Every field of Config in ball_control.py is also a ROS parameter of the same name:
@@ -112,9 +112,16 @@ class BallPushNode(Node):
     # ------------------------------------------------------------------ sensors
     def map_callback(self, msg):
         try:
-            self.pusher.walls = MapWalls(msg)
+            frame = str(msg.header.frame_id).lstrip('/')
+            if frame and frame != self.p['global_frame']:
+                raise ValueError('map frame differs from global_frame')
+            walls = MapWalls(msg)
+            with self.lock:
+                self.pusher.walls = walls
             self.get_logger().info('map received: approach planning with wall clearance is on')
-        except Exception as exc:                                    # keep driving without the planner
+        except Exception as exc:
+            with self.lock:
+                self.pusher.walls = None
             self.get_logger().warning(f'could not build the wall field: {exc}')
 
     def odom_callback(self, msg):
@@ -216,7 +223,7 @@ class BallPushNode(Node):
         m.pose.position.x, m.pose.position.y, m.pose.position.z = float(b[0]), float(b[1]), float(self.cfg.ball_radius)
         m.pose.orientation.w = 1.0
         m.scale.x = m.scale.y = m.scale.z = 0.2
-        held, lost = info['contact'], info['mode'] == 'SEARCH'
+        held, lost = info['contact'], info['mode'] in ('SEARCH', 'REACQUIRE')
         m.color.a = 1.0
         m.color.r, m.color.g, m.color.b = (1.0, 0.0, 0.0) if lost else ((0.0, 1.0, 0.0) if held else (1.0, 0.9, 0.0))
         self.marker_pub.publish(m)

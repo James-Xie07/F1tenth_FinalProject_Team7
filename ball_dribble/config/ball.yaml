@@ -9,6 +9,8 @@ ball_push_node:
     waypoint_file: "levine_ball_path.csv"   # built from levine2.yaml
     scoop_apex_x: 0.507        # measured: ball touching the claw reads 29 cm from the camera -> ball centre 0.54 m ahead of the rear axle
     max_speed: 0.5
+    reacquire_camera_x: 0.29   # match ball_detector_node.cam_x
+    reacquire_camera_y: 0.0
     ball_roll_decel: 0.30      # PLACEHOLDER: measure with scripts/calibrate_ball.py, use ~0.8 x the result
 ball_detector_node:
   ros__parameters:

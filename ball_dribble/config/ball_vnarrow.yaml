@@ -12,6 +12,8 @@ ball_push_node:
     scoop_apex_x: 0.510        # V tip = measured ball centre 0.585 m (rear axle to ball centre, ball seated in V) minus 0.075
     max_speed: 0.3
     search_speed: 0.0          # do not drive on when the ball is not seen
+    reacquire_camera_x: 0.39   # match ball_detector_node.cam_x
+    reacquire_camera_y: 0.04
     ball_roll_decel: 0.30      # PLACEHOLDER: measure with scripts/calibrate_ball.py, use ~0.8 x the result
 ball_detector_node:
   ros__parameters:
