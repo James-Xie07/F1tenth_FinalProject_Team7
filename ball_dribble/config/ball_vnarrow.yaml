@@ -2,7 +2,6 @@
 # Differences from ball.yaml: scoop model = narrow V, centred path, tighter ball colour, slower start.
 ball_push_node:
   ros__parameters:
-    push_controller: "mpc"
     odom_topic: "/pf/pose/odom"
     speed_topic: "/odom"
     odom_is_laser_pose: true

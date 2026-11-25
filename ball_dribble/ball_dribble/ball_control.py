@@ -62,7 +62,7 @@ class Config:
     chase_brake: float = 1.0
     final_range: float = 1.6           # along the path, the last stretch before the ball that uses the aligned approach [m]
     stage_dist: float = 0.60           # staging point: this far behind the ball, pointing along the push direction [m]
-    stage_clear: float = 0.20          # the approach curve must keep this distance from walls [m]
+    stage_clear: float = 0.05          # the approach curve must keep this distance from walls [m]
     stage_kappa: float = 1.0           # ... and not bend sharper than this (front-point curvature) [1/m]
     stage_speed: float = 0.7
     # ---- ball model used by the estimator ----
